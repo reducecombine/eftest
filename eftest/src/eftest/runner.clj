@@ -91,7 +91,7 @@
     :or {capture-output? true}}]
   (let [once-fixtures (-> ns meta ::test/once-fixtures test/join-fixtures)
         each-fixtures (-> ns meta ::test/each-fixtures test/join-fixtures)
-        test-var      (-> (fn [v]
+        test-var      (-> (bound-fn [v]
                             (when-not (and fail-fast? (failed-test?))
                               (binding [report/*testing-path* [ns ::test/each-fixtures]]
                                 (try
