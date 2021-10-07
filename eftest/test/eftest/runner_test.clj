@@ -2,16 +2,43 @@
   (:require [clojure.test :refer :all]
             [eftest.runner :as sut]))
 
-(in-ns 'eftest.test-ns.single-failing-test)
+(def proof-init-state [])
+(def proof
+  "Helps proving that a given deftest was run (and in a specific order, relative to other deftests)."
+  (atom proof-init-state))
+
+;; Example test namespaces may have a prefix such as `ns-0`
+;; so that they can be deterministically sorted.
+
+(in-ns 'eftest.test-ns-0.throwing-test)
+(clojure.core/refer-clojure)
+(clojure.core/require 'clojure.test)
+(clojure.test/deftest throwing-test
+  (swap! eftest.runner-test/proof conj :throwing-test.side-effect)
+  (throw (ex-info "." {})))
+
+(in-ns 'eftest.test-ns-1.throwing-test-in-fixtures)
+(clojure.core/refer-clojure)
+(clojure.core/require 'clojure.test)
+(clojure.test/use-fixtures :once (fn [t]
+                                   (swap! eftest.runner-test/proof conj :throwing-test-in-fixtures.side-effect)
+                                   (throw (ex-info "." {}))
+                                   (t)))
+(clojure.test/deftest throwing-test
+  (clojure.test/is (= 1 1)))
+
+(in-ns 'eftest.test-ns-2.single-failing-test)
 (clojure.core/refer-clojure)
 (clojure.core/require 'clojure.test)
 (clojure.test/deftest single-failing-test
+  (swap! eftest.runner-test/proof conj :single-failing-test.side-effect)
   (clojure.test/is (= 1 2)))
 
-(in-ns 'eftest.test-ns.another-failing-test)
+(in-ns 'eftest.test-ns-3.another-failing-test)
 (clojure.core/refer-clojure)
 (clojure.core/require 'clojure.test)
 (clojure.test/deftest another-failing-test
+  (swap! eftest.runner-test/proof conj :another-failing-test.side-effect)
   (clojure.test/is (= 3 4)))
 
 (in-ns 'eftest.test-ns.slow-test)
@@ -44,23 +71,65 @@
       :return @ret})))
 
 (deftest test-reporting
-  (let [out (:output (test-run-tests 'eftest.test-ns.single-failing-test))]
-    (is (re-find #"FAIL in eftest.test-ns.single-failing-test/single-failing-test" out))
+  (let [out (:output (test-run-tests 'eftest.test-ns-2.single-failing-test))]
+    (is (re-find #"FAIL in eftest.test-ns-2.single-failing-test/single-failing-test" out))
     (is (not (re-find #"IllegalArgumentException" out)))))
 
 (deftest test-fail-fast
-  (let [result (:return
-                (test-run-tests
-                 '[eftest.test-ns.single-failing-test
-                   eftest.test-ns.another-failing-test]
-                 {:fail-fast? true, :multithread? false}))]
-    (is (= {:test 1 :fail 1} (select-keys result [:test :fail])))))
+  (let [run! (fn [nses opts]
+               (reset! proof proof-init-state)
+               (-> nses
+                   (test-run-tests (merge {:multithread? false} opts))
+                   :return
+                   (select-keys [:test :fail :error])))]
+
+    (testing "Failing tests"
+      (let [result (run! '[eftest.test-ns-2.single-failing-test
+                           eftest.test-ns-3.another-failing-test] {:fail-fast? true})]
+        (is (= {:test 1 :fail 1 :error 0} result))
+        (is (= [:single-failing-test.side-effect]
+               @proof)))
+
+      (let [result (run! '[eftest.test-ns-2.single-failing-test
+                           eftest.test-ns-3.another-failing-test] {:fail-fast? false})]
+        (is (= {:test 2 :fail 2 :error 0} result))
+        (is (= [:single-failing-test.side-effect :another-failing-test.side-effect]
+               @proof))))
+
+
+    (testing "Exceptions in tests"
+      (let [result (run! '[eftest.test-ns-0.throwing-test
+                           eftest.test-ns-2.single-failing-test] {:fail-fast? true})]
+        (is (= {:test 1 :fail 0 :error 1} result))
+        (is (= [:throwing-test.side-effect]
+               @proof)))
+
+      (let [result (run! '[eftest.test-ns-0.throwing-test
+                           eftest.test-ns-2.single-failing-test] {:fail-fast? false})]
+        (is (= {:test 2 :fail 1 :error 1} result))
+        (is (= [:throwing-test.side-effect
+                :single-failing-test.side-effect]
+               @proof))))
+
+    (testing "Exceptions in fixtures"
+      (let [result (run! '[eftest.test-ns-1.throwing-test-in-fixtures
+                           eftest.test-ns-2.single-failing-test] {:fail-fast? true})]
+        (is (= {:test 0 :fail 0 :error 1} result))
+        (is (= [:throwing-test-in-fixtures.side-effect]
+               @proof)))
+
+      (let [result (run! '[eftest.test-ns-1.throwing-test-in-fixtures
+                           eftest.test-ns-2.single-failing-test] {:fail-fast? false})]
+        (is (= {:test 1 :fail 1 :error 1} result))
+        (is (= [:throwing-test-in-fixtures.side-effect
+                :single-failing-test.side-effect]
+               @proof))))))
 
 (deftest test-fail-multi
   (let [out (:output
              (test-run-tests
-              '[eftest.test-ns.single-failing-test
-                eftest.test-ns.another-failing-test]))]
+              '[eftest.test-ns-2.single-failing-test
+                eftest.test-ns-3.another-failing-test]))]
     (println out)
     (is (re-find #"(?m)expected: 1\n  actual: 2" out))
     (is (re-find #"(?m)expected: 3\n  actual: 4" out))))
