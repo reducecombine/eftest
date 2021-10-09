@@ -6,8 +6,8 @@
 (def tests-completed
   (atom tests-completed-init-state))
 
-;; Example test namespaces may have a prefix such as `ns-0`
-;; so that they can be deterministically sorted.
+;; Example test namespaces have a prefix such as ns-0 so that they can be
+;; deterministically sorted.
 
 (in-ns 'eftest.test-ns-0.throwing-test)
 (clojure.core/refer-clojure)
@@ -19,10 +19,13 @@
 (in-ns 'eftest.test-ns-1.throwing-test-in-fixtures)
 (clojure.core/refer-clojure)
 (clojure.core/require 'clojure.test)
-(clojure.test/use-fixtures :once (fn [t]
-                                   (swap! eftest.runner-test/tests-completed conj :throwing-test-in-fixtures.side-effect)
-                                   (throw (ex-info "." {}))
-                                   (t)))
+(clojure.test/use-fixtures :once
+  (fn [t]
+    (swap! eftest.runner-test/tests-completed
+           conj
+           :throwing-test-in-fixtures.side-effect)
+    (throw (ex-info "." {}))
+    (t)))
 (clojure.test/deftest throwing-test
   (clojure.test/is (= 1 1)))
 
@@ -94,7 +97,6 @@
         (is (= {:test 2 :fail 2 :error 0} result))
         (is (= [:single-failing-test.side-effect :another-failing-test.side-effect]
                @tests-completed))))
-
 
     (testing "Exceptions in tests"
       (let [result (run! '[eftest.test-ns-0.throwing-test
