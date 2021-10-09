@@ -26,7 +26,7 @@
            :throwing-test-in-fixtures.side-effect)
     (throw (ex-info "." {}))
     (t)))
-(clojure.test/deftest throwing-test
+(clojure.test/deftest example-test
   (clojure.test/is (= 1 1)))
 
 (in-ns 'eftest.test-ns-2.single-failing-test)
